@@ -1,6 +1,6 @@
 # Model Predictive Control for Quadrotor of PX4 SITL simulation
 
-> 这是一个基于模型预测控制（MPC）框架的四旋翼轨迹跟踪控制项目，同时进行了抗干扰，针对PX4 SITL仿真，但是能够很容易移植到真实四旋翼平台，尤其当飞控是PX4时。
+> 这是一个基于模型预测控制（MPC）框架的四旋翼轨迹跟踪控制项目，同时进行了抗干扰，针对PX4 SITL仿真，但是能够很容易移植到真实四旋翼平台，尤其当飞控是PX4时。本工程在Ubuntu20.04+ROS Noetic上进行了测试。
 ## 参考代码
 代码参考了开源工程https://github.com/uzh-rpg/rpg_mpc?tab=readme-ov-file
 ## 安装依赖
