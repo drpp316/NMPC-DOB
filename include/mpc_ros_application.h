@@ -81,10 +81,3 @@ public:
         return control_upper_bound_;
     }         
 };
-
-class MpcFactory 
-{
-public:
-    virtual ~MpcFactory() {}
-    virtual MpcRosApplication* createMpcRosApplication() = 0;
-};
