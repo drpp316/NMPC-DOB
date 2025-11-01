@@ -4,7 +4,7 @@
 # compile CXX with /usr/bin/c++
 CXX_DEFINES = 
 
-CXX_INCLUDES = -I/home/lw/catkin_ws/src/quadrotor_rsmpc/mpc_controller/. -I/home/lw/ACADOtoolkit -I/home/lw/ACADOtoolkit/acado -I/home/lw/ACADOtoolkit/external_packages -I/home/lw/ACADOtoolkit/external_packages/qpOASES-3.2.0/include -I/home/lw/ACADOtoolkit/build
+CXX_INCLUDES = -I/home/go2/ws_my/src/quadrotor_mpc/mpc_controller/. -I/usr/local/include/acado
 
 CXX_FLAGS =  -std=c++0x
 

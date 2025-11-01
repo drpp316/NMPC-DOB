@@ -227,6 +227,7 @@ void DisturbanceObserver::nonlinear_update(const Eigen::VectorXd& y, const Eigen
 
 void DisturbanceObserver::kalman_geso_update(const Eigen::VectorXd& y, const Eigen::VectorXd& u, double m, double g_z)
 {
+    /*准备模型*/
     Eigen::MatrixXd A(kf_.state_size_, kf_.state_size_);
     A.setZero();
 
@@ -235,10 +236,11 @@ void DisturbanceObserver::kalman_geso_update(const Eigen::VectorXd& y, const Eig
     // Unpack quaternion from y
     double qw = y(3), qx = y(4), qy = y(5), qz = y(6);
 
-    // Bu matrix (control input T, w_x, w_y, w_z)
+    // Bu matrix (control input  w_x, w_y, w_z,T)
     Eigen::MatrixXd B_u(kf_.state_size_, kf_.control_size_);
     Eigen::MatrixXd B_d(kf_.state_size_, 3);
     B_u.setZero();
+    B_d.setZero();
 
     B_u(3,0) = -0.5 * qx;  // ∂q_w/∂w_x
     B_u(3,1) = -0.5 * qy;  // ∂q_w/∂w_y
@@ -269,6 +271,8 @@ void DisturbanceObserver::kalman_geso_update(const Eigen::VectorXd& y, const Eig
     Eigen::MatrixXd A3 = A2 * A;
     Eigen::MatrixXd A4 = A3 * A;
 
+
+
     // ESKF Discretization
     Eigen::MatrixXd temp = Eigen::MatrixXd::Identity(kf_.state_size_, kf_.state_size_) 
                             + dt_ * A
@@ -288,7 +292,8 @@ void DisturbanceObserver::kalman_geso_update(const Eigen::VectorXd& y, const Eig
 	// 状态更新
 
 	Eigen::VectorXd estimated_states = kf_.getState();
-	    // 动力学模型
+	   
+    // 动力学模型
     double f_x = z_b(0) * u(3)/m;
     double f_y = z_b(1) * u(3)/m;
     double f_z = z_b(2) * u(3)/m - g_z;
@@ -299,10 +304,11 @@ void DisturbanceObserver::kalman_geso_update(const Eigen::VectorXd& y, const Eig
 	// e(3) = estimated_states(1) - z_(3);
 	// e(4) = estimated_states(2) - z_(4);
 
-// 状态更新
+    // 状态更新
     z_(0) += (z_(3) + l_(0) * e(0)) * dt_;
     z_(1) += (z_(4) + l_(0) * e(1)) * dt_;
     z_(2) += (z_(5) + l_(0) * e(2)) * dt_;
+    
     z_(3) += (f_x + d_(0) + l_(1) * e(0)) * dt_;
     z_(4) += (f_y + d_(1) + l_(1) * e(1)) * dt_;
     z_(5) += (f_z + d_(2) + l_(1) * e(2)) * dt_;

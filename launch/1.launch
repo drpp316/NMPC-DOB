@@ -1,0 +1,42 @@
+<launch>
+
+
+ 
+  <!-- 3. 启动 RViz 并加载预设配置文件 -->
+  <!-- 
+  <node 
+    pkg="rviz" 
+    type="rviz" 
+    name="rviz" 
+    args="-d $(find quadrotor_mpc)/rviz-1.rviz"  
+    output="screen"
+  />
+  -->
+  
+ <!-- 加载位置监控曲线配置（positionXYZ.perspective） -->
+  <node 
+    name="rqt_plot_position" 
+    pkg="rqt_gui" 
+    type="rqt_gui" 
+    output="screen" 
+    args="--perspective-file $(find quadrotor_mpc)/rqtplot/positionXYZ.perspective"
+  />
+
+  <!-- 加载控制量曲线配置（u_boayrate&thrust.perspective），注意&用\转义 -->
+  <node 
+    name="rqt_plot_control" 
+    pkg="rqt_gui" 
+    type="rqt_gui" 
+    output="screen" 
+    args="--perspective-file $(find quadrotor_mpc)/rqtplot/u_boayrate_thrust.perspective"
+  />
+  
+    <!-- 加载控制量曲线配置（u_boayrate&thrust.perspective），注意&用\转义 -->
+  <node 
+    name="rqt_plot_dhat" 
+    pkg="rqt_gui" 
+    type="rqt_gui" 
+    output="screen" 
+    args="--perspective-file $(find quadrotor_mpc)/rqtplot/dhat.perspective"
+  />
+</launch>

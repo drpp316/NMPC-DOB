@@ -12,6 +12,10 @@
 
 #include "mpc_tracking.h"
 
+
+bool observer_enabled = false;  // 观测器使能标志位，默认false（不启动）
+
+
 class OffboardMode
 {
 private:
@@ -37,6 +41,7 @@ private:
     real_t max_thrust_;
     bool is_mpc_start_;
 
+
     TrackingMpc* mpc_ros_application_;
     
 public:
@@ -53,4 +58,5 @@ public:
         const Eigen::Ref<const Eigen::Matrix<real_t, ACADO_NU, 1>> control);
     void shutdown();
     float controlNormalization(float signal, float min, float max);
+    //bool isObserverEnabled() const { return observer_enabled_; }// 提供获取标志位的接口，供mpc_tracking调用
 };

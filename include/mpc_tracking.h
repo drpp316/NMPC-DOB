@@ -9,12 +9,18 @@
 #include "mpc_ros_application.h"
 #include "disturbance_observer.h"
 #include "plot.h"
+#include <std_msgs/Float64MultiArray.h>
 
+//#include "px4_interface.h"
+ 
 // 轨迹点结构
 struct Point2D {
     double x;
     double y;
 };
+
+//extern bool observer_enabled_;// 全局观测器使能标志位（extern声明，仅在此处声明，不定义）
+bool observer_enabled_=true;// 全局观测器使能标志位（extern声明，仅在此处声明，不定义）
 
 class TrackingMpc: public MpcRosApplication 
 {
@@ -23,6 +29,13 @@ private:
     ros::Subscriber gdt_subscriber_;
     ros::Subscriber contact_subscriber_;
     ros::Publisher payload_force_publisher_;
+
+    ros::Publisher disturbance_pub_;  // 干扰估计发布者
+    std_msgs::Float64MultiArray disturbance_msg_;  // 干扰消息
+
+      
+
+
     Eigen::MatrixXd qrs_;
     double gamma_;
     Eigen::MatrixXd Gamma_ = Eigen::MatrixXd::Zero(ACADO_NX, ACADO_NX);
@@ -50,6 +63,7 @@ private:
         TRAJECTORY_CIRCLE,
         TRAJECTORY_CIRCLE_2,
         TRAJECTORY_LEMNISCATE, 
+        TRAJECTORY_point,
     };
 
     enum ForcePubType
@@ -83,7 +97,7 @@ private:
 
         static constexpr real_t kStartPosX = 0.0;
         static constexpr real_t kStartPosY = 0.0;
-        static constexpr real_t kStartPosZ = 1.0;
+        static constexpr real_t kStartPosZ = 1.5;
         CurrentTargetStates(): target_x(kStartPosX), target_y(kStartPosY), 
                               target_z(kStartPosZ), target_vx(0.0), 
                               target_vy(0.0), target_vz(0.0), target_thrust(kG*kMass),
@@ -111,6 +125,9 @@ private:
     std::vector<Point2D> raw_traj_;
     std::vector<double> arc_len_;
 
+    
+  
+
 
 public:
     TrackingMpc();
@@ -132,4 +149,5 @@ public:
     Eigen::Vector3d Quaternion2Euler(Eigen::Quaterniond q);
     std::vector<Point2D> generateLemniscateTrajectory(double a, double t_step);
     std::vector<double> computeArcLength(const std::vector<Point2D>& traj);
+
 };

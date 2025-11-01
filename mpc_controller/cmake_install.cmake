@@ -1,4 +1,4 @@
-# Install script for directory: /home/lw/catkin_ws/src/quadrotor_rsmpc/mpc_controller
+# Install script for directory: /home/go2/ws_my/src/quadrotor_mpc/mpc_controller
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)
@@ -45,7 +45,7 @@ endif()
 string(REPLACE ";" "\n" CMAKE_INSTALL_MANIFEST_CONTENT
        "${CMAKE_INSTALL_MANIFEST_FILES}")
 if(CMAKE_INSTALL_LOCAL_ONLY)
-  file(WRITE "/home/lw/catkin_ws/src/quadrotor_rsmpc/mpc_controller/install_local_manifest.txt"
+  file(WRITE "/home/go2/ws_my/src/quadrotor_mpc/mpc_controller/install_local_manifest.txt"
      "${CMAKE_INSTALL_MANIFEST_CONTENT}")
 endif()
 if(CMAKE_INSTALL_COMPONENT)
@@ -61,6 +61,6 @@ else()
 endif()
 
 if(NOT CMAKE_INSTALL_LOCAL_ONLY)
-  file(WRITE "/home/lw/catkin_ws/src/quadrotor_rsmpc/mpc_controller/${CMAKE_INSTALL_MANIFEST}"
+  file(WRITE "/home/go2/ws_my/src/quadrotor_mpc/mpc_controller/${CMAKE_INSTALL_MANIFEST}"
      "${CMAKE_INSTALL_MANIFEST_CONTENT}")
 endif()

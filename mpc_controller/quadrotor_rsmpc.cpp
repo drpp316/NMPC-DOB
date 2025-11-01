@@ -16,12 +16,15 @@ int main()
     DifferentialState     v_x, v_y, v_z;
     Control               w_x, w_y, w_z, T;   
     OnlineData            d_x, d_y, d_z;
+    
+    //干扰观测器估计 d_hat_ → 构造 online_data_（复制到所有预测步） →
+    //→ 通过 Eigen::Map 赋值给 acado_online_data_ → ACADO 内部绑定到模型中的 d_x, d_y, d_z。
 
 
     // Parameters with exemplary values. These are set/overwritten at runtime.
     const double t_start = 0.0;     // Initial time [s]
-    const double t_end = 2.0;       // Time horizon [s]
-    const double dt = 0.1;          // Discretization time [s]
+    const double t_end = 1.0;       // Time horizon [s]
+    const double dt = 0.1;          // Discretization time [s] //0.01
     const int N = round(t_end/dt);  // Number of nodes
     const double g_z = 9.8066;      // Gravity is everywhere [m/s^2]
     const double w_max_yaw = 2.0;     // Maximal yaw rate [rad/s]
@@ -57,6 +60,8 @@ int main()
     << q_w << q_x << q_y << q_z 
     << v_x << v_y << v_z;
 
+    /*----------仿真测试 权重-------------*/
+    //  权重
     DMatrix Q(h.getDim(), h.getDim());
     Q.setIdentity();
     Q(0,0) = 200;   // x
@@ -74,6 +79,7 @@ int main()
     Q(12,12) = 1;   // wz
     Q(13,13) = 1;   // T
 
+    //  终端权重
     // End cost weight matrix
     DMatrix QN(hN.getDim(), hN.getDim());
     QN.setIdentity();
@@ -109,12 +115,14 @@ int main()
 
     OCP ocp( t_start, t_end, N );
 
-    if(!CODE_GEN)
+    if(!CODE_GEN)//数值仿真
     {
         // For analysis, set references.
         ocp.minimizeLSQ( Q, h, r );
         ocp.minimizeLSQEndTerm( QN, hN, rN );
-    }else{
+
+    }else{ //实机
+        
         // For code generation, references are set during run time.
         BMatrix Q_sparse(h.getDim(), h.getDim());
         Q_sparse.setIdentity();
@@ -136,7 +144,7 @@ int main()
 
     ocp.setNOD(3);
 
-    if(!CODE_GEN)
+    if(!CODE_GEN) //数值仿真
     {
         // Set initial state
         ocp.subjectTo( AT_START, p_x ==  0.0 );
@@ -153,20 +161,23 @@ int main()
         ocp.subjectTo( AT_START, w_y ==  0.0 );
         ocp.subjectTo( AT_START, w_z ==  0.0 );
 
+
         // Setup some visualization
-        GnuplotWindow window1( PLOT_AT_EACH_ITERATION );
+        GnuplotWindow window1( PLOT_AT_END );
         window1.addSubplot( p_x,"position x" );
         window1.addSubplot( p_y,"position y" );
         window1.addSubplot( p_z,"position z" );
-        window1.addSubplot( q_w,"quaternion w" );
-        window1.addSubplot( q_x,"quaternion x" );
-        window1.addSubplot( q_y,"quaternion y" );
-        window1.addSubplot( q_z,"quaternion z" );
-        window1.addSubplot( v_x,"verlocity x" );
-        window1.addSubplot( v_y,"verlocity y" );
-        window1.addSubplot( v_z,"verlocity z" );
 
-        GnuplotWindow window3( PLOT_AT_EACH_ITERATION );
+        GnuplotWindow window2( PLOT_AT_END);
+        window2.addSubplot( q_w,"quaternion w" );
+        window2.addSubplot( q_x,"quaternion x" );
+        window2.addSubplot( q_y,"quaternion y" );
+        window2.addSubplot( q_z,"quaternion z" );
+        window2.addSubplot( v_x,"verlocity x" );
+        window2.addSubplot( v_y,"verlocity y" );
+        window2.addSubplot( v_z,"verlocity z" );
+
+        GnuplotWindow window3( PLOT_AT_END );
         window3.addSubplot( w_x,"rotation-acc x" );
         window3.addSubplot( w_y,"rotation-acc y" );
         window3.addSubplot( w_z,"rotation-acc z" ); 
@@ -178,12 +189,11 @@ int main()
         algorithm.set( INTEGRATOR_TOLERANCE, 1e-6 );
         algorithm.set( KKT_TOLERANCE, 1e-3 );
         algorithm << window1;
+        //algorithm << window2;
         algorithm << window3;
         algorithm.solve();
-
     }
-
-    else
+    else //实机
     {
         OCPexport mpc(ocp);
 
