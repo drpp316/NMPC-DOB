@@ -1,0 +1,3 @@
+# 扰动观测器参数
+disturbance_observer:
+  omega: 2.0 # 这里是需要频繁修改的值

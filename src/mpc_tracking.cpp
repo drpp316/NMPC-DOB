@@ -7,17 +7,19 @@
 
 //构造函数
 TrackingMpc::TrackingMpc(): 
-trajectory_type_(TRAJECTORY_CIRCLE),  // 初始化成员变量   TRAJECTORY_LEMNISCATE TRAJECTORY_CIRCLE
-speed_(1.0),
+trajectory_type_(TRAJECTORY_point),  // 初始化成员变量   TRAJECTORY_LEMNISCATE TRAJECTORY_CIRCLE
+speed_(3.0),
 let_mpc_run_(false),
-gamma_(-0.1)
+gamma_(0),
+is_estimation_running_(false) 
 {
     init();
+    startDisturbanceEstimation(); // 初始化完成后启动干扰估计线程
 }
 
 TrackingMpc::~TrackingMpc()
 {
-
+    stopDisturbanceEstimation();  // 停止干扰估计线程
 }
 
 void TrackingMpc::init() 
@@ -45,8 +47,8 @@ void TrackingMpc::init()
     // 2. 初始化状态权重矩阵 q_（kCostStateSize 是成本函数中的状态维度，通常与ACADO_NX一致）
     q_ = (Eigen::Matrix<real_t, kCostStateSize, 1>() <<
         10.0 * Eigen::Matrix<real_t, 2, 1>::Ones(),//10
-        10,
-        5.0 * Eigen::Matrix<real_t, 4, 1>::Ones(),
+        9,
+        10 * Eigen::Matrix<real_t, 4, 1>::Ones(),
         0.1 * Eigen::Matrix<real_t, 3, 1>::Ones()).finished().asDiagonal();
 
     // 3. 初始化控制量权重矩阵 r_（ACADO_NU 是控制量维度，如4维：3角速度+1推力）
@@ -75,19 +77,11 @@ void TrackingMpc::init()
 
     //轨迹生成线程启动（异步准备轨迹数据）创建一个新的线程,并列（并发）运行
     trajectory_creation_thread_ = std::thread(&TrackingMpc::createTrajectory, this);
-
- 
 }
 
-void TrackingMpc::setReference() 
-{
-    reference_controls_ = (Eigen::Matrix<real_t, ACADO_NU, 1>() << 
-        current_target_states_.target_wx, current_target_states_.target_wy,
-        current_target_states_.target_wz,
-        current_target_states_.target_thrust ).finished().replicate(1, ACADO_N);
-    // 调用MpcWrapper函数将reference传入到mpc_wrapper_中
-    mpc_wrapper_.setMpcReference(reference_states_, reference_controls_);
-}
+
+
+
 
 void TrackingMpc::odomCallback(const nav_msgs::OdometryConstPtr& odom_msg) 
 {
@@ -162,42 +156,24 @@ void TrackingMpc::gdtCallback(const gazebo_msgs::ModelStatesConstPtr& gdt_msg)
     }
 }
 
-void TrackingMpc::setWeight()
-{
-   
-}
-
-void TrackingMpc::setOnlineData()
-{
-    mpc_wrapper_.setMpcOnlineData(online_data_);
-}
 
 
-// MPC 控制器的 核心控制循环
-void TrackingMpc::mpcProcess()
+
+
+
+
+
+
+// 干扰估计线程的主函数（独立循环更新d_hat_）
+void TrackingMpc::disturbanceEstimationLoop() 
 {
-    while (ros::ok())
+    while(ros::ok())
     {
-
         static auto current_time = std::chrono::steady_clock::now();
-
-        if(is_contact_)
-        {
-            mpc_error_ = CONTACT_DETECTED;
-            return;
-        }
 
         auto pre_time = current_time;
         current_time = std::chrono::steady_clock::now();
 
-        // 检查OffboardMode指针是否有效（避免空指针错误）
-        if (!observer_enabled_) {
-            ROS_WARN_THROTTLE(1, "observer_enabled_ error");
-        }
-
-
-
-        /*-------------状态向量与干扰观测器更新---------*/
         // 1. 提取当前状态（位置、姿态、速度）到向量 y
         Eigen::VectorXd y = Eigen::VectorXd::Zero(ACADO_NX);
         y << current_states_(0), current_states_(1), current_states_(2),
@@ -236,23 +212,65 @@ void TrackingMpc::mpcProcess()
                 // 标志位为false：观测器输出强制为0
                 d_hat_.setZero();
         }
+ 
         disturbance_msg_.data[0] = d_hat_(0, 0);  // 赋值 d_x 估计值
         disturbance_msg_.data[1] = d_hat_(1, 0);  // 赋值 d_y 估计值
         disturbance_msg_.data[2] = d_hat_(2, 0);  // 赋值 d_z 估计值
         disturbance_pub_.publish(disturbance_msg_);  // 发布干扰消息
 
+        //d_hat_.setZero();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));//100hz
+    } 
+
+}
+
+// 启动干扰估计线程
+void TrackingMpc::startDisturbanceEstimation() {
+    is_estimation_running_ = true;
+    // 启动线程，绑定到干扰估计循环函数
+    disturbance_estimation_thread_ = std::thread(&TrackingMpc::disturbanceEstimationLoop, this);
+}
+
+// 停止干扰估计线程
+void TrackingMpc::stopDisturbanceEstimation() {
+    is_estimation_running_ = false;
+    if (disturbance_estimation_thread_.joinable()) {
+        disturbance_estimation_thread_.join();  // 等待线程退出
+    }
+}
+
+
+
+
+
+
+
+// MPC 控制器的 核心控制循环
+void TrackingMpc::mpcProcess()
+{
+    while (ros::ok())
+    {
+        static auto current_time = std::chrono::steady_clock::now();
+        auto pre_time = current_time;
+        current_time = std::chrono::steady_clock::now();
+
+        if(is_contact_)
+        {
+            mpc_error_ = CONTACT_DETECTED;
+            return;
+        }
+
+        //disturbanceEstimationLoop();
+
         // 1. 构造在线数据（将估计的干扰 d_hat_ 复制到 MPC 所有预测步）
-        online_data_ = (Eigen::Matrix<real_t, ACADO_NOD, 1>() << d_hat_.block<3,1>(0,0)).finished().replicate(1, ACADO_N + 1);
+        //（d_hat_由disturbance_estimation_thread_更新）
+         online_data_ = (Eigen::Matrix<real_t, ACADO_NOD, 1>() << d_hat_.block<3,1>(0,0)).finished().replicate(1, ACADO_N + 1);
         // printf("onlinedata: %f\t %f\t %f\n", online_data_(0,0) ,online_data_(1,0), online_data_(2,0));
         
-        // 2. 更新参考轨迹（如 8字形、圆形轨迹的当前目标点）
-        setReference();
-
-        // 3. 更新 MPC 权重矩阵（状态跟踪权重 q_、控制量权重 r_ 等）
-        setWeight();
-
-        // 4. 设置 MPC 在线数据（将 online_data_ 传递给求解器）
-        setOnlineData();
+        
+        setReference();// 2. 更新参考轨迹（如 8字形、圆形轨迹的当前目标点）
+        setWeight(); // 3. 更新 MPC 权重矩阵（状态跟踪权重 q_、控制量权重 r_ 等）
+        setOnlineData();// 4. 设置 MPC 在线数据（将 online_data_ 传递给求解器）
 
         std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now(); 
         std::chrono::milliseconds duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - current_time);
@@ -261,23 +279,27 @@ void TrackingMpc::mpcProcess()
         if(is_new_data_)
         {
             is_new_data_ = false;
+            Eigen::Matrix<float, 10, 1> state_float;
+            if (true){
+                 state_float= current_states_; //测量状态
+            }
+            else{
+                state_float = disturbance_observer_.getKfState().cast<float>();//KF滤波状态                   
+            }
 
-            // std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+
+            if(mpc_wrapper_.solveMpc(state_float))
             {
-                // std::lock_guard<std::mutex> lock(mpc_mutex_);
-                if(mpc_wrapper_.solveMpc(current_states_))    // 调用 MPC 求解器计算最优控制量
-                {
-                    // std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now(); 
-                    // std::chrono::milliseconds duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-                    // double period = duration.count();
-                    // std::cout << "mpcsolve time: " << period << " ms" << std::endl;         
-                    mpc_wrapper_.getMpcControl(current_control_, 0); // 获取第 0 步的控制量（当前应执行的控制）
-                    // std::cout << "mpc_control:" << current_control_.transpose() << std::endl;
-                }
-                else
-                {
-                    ROS_WARN("MPC solve failed!");
-                }
+                // std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now(); 
+                // std::chrono::milliseconds duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+                // double period = duration.count();
+                // std::cout << "mpcsolve time: " << period << " ms" << std::endl;         
+                mpc_wrapper_.getMpcControl(current_control_, 0); // 获取第 0 步的控制量（当前应执行的控制）
+                // std::cout << "mpc_control:" << current_control_.transpose() << std::endl;
+            }
+            else
+            {
+                ROS_WARN("MPC solve failed!");
             }
             
         }
@@ -296,6 +318,27 @@ void TrackingMpc::mpcProcess()
         std::this_thread::sleep_for(std::chrono::milliseconds(10));//100hz
     } 
 }
+
+void TrackingMpc::setReference() 
+{
+    reference_controls_ = (Eigen::Matrix<real_t, ACADO_NU, 1>() << 
+        current_target_states_.target_wx, current_target_states_.target_wy,
+        current_target_states_.target_wz,
+        current_target_states_.target_thrust ).finished().replicate(1, ACADO_N);
+    // 调用MpcWrapper函数将reference传入到mpc_wrapper_中
+    mpc_wrapper_.setMpcReference(reference_states_, reference_controls_);
+}
+
+void TrackingMpc::setWeight()
+{
+ 
+}
+
+void TrackingMpc::setOnlineData()
+{
+    mpc_wrapper_.setMpcOnlineData(online_data_);
+}
+
 
 Eigen::Vector3d TrackingMpc::Quaternion2Euler(Eigen::Quaterniond q)
 {
@@ -367,8 +410,10 @@ void TrackingMpc::createTrajectory()
             static double target_x = 0.0;           // 缓启动
             static double target_y = 0.0;
             static double target_z = 0.0;
+            
+
             static int target_count = 0;
-            int resolution = 600;
+            int resolution = 300;
 
             if(target_count < resolution)
             {
@@ -381,11 +426,12 @@ void TrackingMpc::createTrajectory()
             // 计算当前位置与目标位置的水平距离和垂直距离
             float horizontal_distance = 0.0;
             float z_distance = 0.0;
-            horizontal_distance = 
-                sqrtf(powf(current_states_[0]- current_target_states_.target_x, 2) + 
-                    powf(current_states_[1] - current_target_states_.target_y, 2));
-            //z_distance = current_states_[2];
-            z_distance = fabs(current_states_[2] - current_target_states_.target_z);  // 修正：计算z轴距离（绝对值）
+            float ex = current_states_[0] - current_target_states_.target_x;
+            float ey = current_states_[1] - current_target_states_.target_y;
+            float ez = current_states_[2] - current_target_states_.target_z;
+
+            horizontal_distance = sqrtf(powf(ex, 2) + powf(ey, 2));
+            z_distance = fabs(ez);  // 修正：计算z轴距离（绝对值）
             
             //更新 MPC 参考轨迹
             reference_states_ = (Eigen::Matrix<real_t, kCostStateSize, 1>() << 
@@ -394,6 +440,9 @@ void TrackingMpc::createTrajectory()
             current_target_states_.target_q.y(), current_target_states_.target_q.z(),
             current_target_states_.target_vx, current_target_states_.target_vy, 
             current_target_states_.target_vz).finished().replicate(1, ACADO_N + 1);
+
+            //printf("distance: x- %f\t   y- %f\t  z- %f\t \n", ex,ey,ez);
+            printf(" ez- %f\t   tz- %f  \t \n", ez,target_z);
 
             if(horizontal_distance < 0.1 && z_distance <  0.1)
             {
@@ -458,7 +507,7 @@ void TrackingMpc::createTrajectory()
                     static auto start_time = std::chrono::steady_clock::now();
                     static double r = 2;
                     static int count = 0;
-                    current_target_states_.target_z = 2;
+                    //current_target_states_.target_z = 4;
                     auto now = std::chrono::steady_clock::now();
                     double elapsed = std::chrono::duration<double>(now - start_time).count();
                     double theta = speed_ * elapsed / r;  // 弧度单位
@@ -492,8 +541,8 @@ void TrackingMpc::createTrajectory()
                     }
 
                     // 圆轨迹坐标更新  没用 
-                    current_target_states_.target_x = r * std::cos(theta);
-                    current_target_states_.target_y = r * std::sin(theta);
+                    //current_target_states_.target_x = r * std::cos(theta);
+                    //current_target_states_.target_y = r * std::sin(theta);
 
                     //生成 MPC 的多步参考轨迹（预测未来所有时间步的目标）
                     for(int i = 0; i < ACADO_N + 1; i++)
@@ -521,7 +570,7 @@ void TrackingMpc::createTrajectory()
                         else
                         {
                             reference_states_.block(0,i,kCostStateSize,1) = (Eigen::Matrix<real_t, kCostStateSize, 1>() << 
-                            r * std::cos(theta_i), 
+                            r * (std::cos(theta_i)-1), 
                             r * std::sin(theta_i),
                             current_target_states_.target_z,
                             current_target_states_.target_q.w(),

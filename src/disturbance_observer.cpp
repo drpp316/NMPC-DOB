@@ -12,7 +12,11 @@ DisturbanceObserver::DisturbanceObserver(double dt)
     // l_ << 3*omega, 3*omega*omega, omega*omega*omega;
     // l_(0) = -pole_ * 2;
     // l_(1) = pow(l_(0),2) / 3;
-    double omega = 1.5;
+
+
+    //double omega = 1.5;
+    double omega = 2;
+
     l_.block<3, 1>(0, 0) << 3*omega, 3*omega*omega, omega*omega*omega;
     // l_.block<4, 1>(0, 0) << 4*omega, 6*omega*omega, 4*omega*omega*omega, omega*omega*omega*omega;
 
@@ -242,6 +246,7 @@ void DisturbanceObserver::kalman_geso_update(const Eigen::VectorXd& y, const Eig
     B_u.setZero();
     B_d.setZero();
 
+    //A(q)
     B_u(3,0) = -0.5 * qx;  // ∂q_w/∂w_x
     B_u(3,1) = -0.5 * qy;  // ∂q_w/∂w_y
     B_u(3,2) = -0.5 * qz;  // ∂q_w/∂w_z
@@ -259,6 +264,7 @@ void DisturbanceObserver::kalman_geso_update(const Eigen::VectorXd& y, const Eig
     B_u(6,2) =  0.5 * qw;  // ∂q_z/∂w_z
 
     // Simplified force direction from quaternion: here using T * gravity-aligned vector
+    //C(q)/m
     Eigen::Vector3d z_b;
     z_b << 2 * (qw*qy + qx*qz),
     2 * (qy*qz - qw*qx),
@@ -287,24 +293,30 @@ void DisturbanceObserver::kalman_geso_update(const Eigen::VectorXd& y, const Eig
     Eigen::VectorXd tail = B_d * d_.block<3, 1>(0, 0) 
         - g_z * dt_ * Eigen::VectorXd::Unit(kf_.state_size_, 9);  
    
+
+    //--------------- EKF---------------------------
 	kf_.predict(A, B_u, tail, u);
 	kf_.update(y.block<7, 1>(0, 0));
 	// 状态更新
 
-	Eigen::VectorXd estimated_states = kf_.getState();
+	Eigen::VectorXd x_kf = kf_.getState();//kf 估计状态
 	   
     // 动力学模型
     double f_x = z_b(0) * u(3)/m;
     double f_y = z_b(1) * u(3)/m;
     double f_z = z_b(2) * u(3)/m - g_z;
 
-    // 误差计算
-    Eigen::VectorXd e = y.block<3, 1>(0, 0) - z_.block<3, 1>(0, 0);
-	// e(2) = estimated_states(0) - z_(2);
-	// e(3) = estimated_states(1) - z_(3);
-	// e(4) = estimated_states(2) - z_(4);
+    //--------------- ESO---------------------------
+    Eigen::Vector3d e;
+    //e = y.block<3, 1>(0, 0) - z_.block<3, 1>(0, 0);//系统测量
+/**/
+    //KF输出
+	 e(0) = x_kf(0) - z_(0);
+	 e(1) = x_kf(1) - z_(1);
+	 e(2) = x_kf(2) - z_(2);
 
     // 状态更新
+    
     z_(0) += (z_(3) + l_(0) * e(0)) * dt_;
     z_(1) += (z_(4) + l_(0) * e(1)) * dt_;
     z_(2) += (z_(5) + l_(0) * e(2)) * dt_;
@@ -312,6 +324,7 @@ void DisturbanceObserver::kalman_geso_update(const Eigen::VectorXd& y, const Eig
     z_(3) += (f_x + d_(0) + l_(1) * e(0)) * dt_;
     z_(4) += (f_y + d_(1) + l_(1) * e(1)) * dt_;
     z_(5) += (f_z + d_(2) + l_(1) * e(2)) * dt_;
+    
 
     // 扰动更新
     d_(0) += l_(2) * e(0) * dt_;
@@ -319,8 +332,157 @@ void DisturbanceObserver::kalman_geso_update(const Eigen::VectorXd& y, const Eig
     d_(2) += l_(2) * e(2) * dt_;
 }
 
-void DisturbanceObserver::kalman_gpio_update(const Eigen::VectorXd& y, const Eigen::VectorXd& u, double m, double g_z)
+
+
+void DisturbanceObserver::EKF_geso_update(const Eigen::VectorXd& y, const Eigen::VectorXd& u, double m, double g_z)
 {
+    /*
+    //准备模型
+    // x=[ pos(0,1,2), q (3,4,5,6) as [qw,qx,qy,qz], vel(7,8,9), m(10) ]
+    int state_size_=ekf_2.state_size_;//11维， 扩展m
+
+
+    //------------------线性化-A矩阵---------------
+    Eigen::MatrixXd A_ext(state_size_, state_size_);
+    A_ext.setZero();
+    A_ext.block<3,3>(0,7) = Eigen::Matrix3d::Identity();
+
+    // 2.2 姿态动力学：四元数对自身的偏导数（基于四元数微分方程）
+    double wx = u(0), wy = u(1), wz = u(2);  // 提取角速度控制量
+
+    // 2) 四元数动力学雅可比： q_dot = 0.5 * Omega(omega) * q
+    Eigen::Matrix4d M;
+    M <<  0.0,   -wx,   -wy,   -wz,
+          wx,     0.0,   wz,   -wy,
+          wy,    -wz,    0.0,   wx,
+          wz,     wy,   -wx,    0.0;
+    A_ext.block<4,4>(3,3) = 0.5 * M; // M(w)=∂{A(q)w}/∂q
+
+    double qw = y(3), qx = y(4), qy = y(5), qz = y(6);
+
+     // 2.3 速度-质量耦合（关键：添加速度对质量m的偏导数）
+    double T = u(3);  // 提取推力控制量
+    Eigen::VectorXd x_kf_prev = ekf_2.getState();  // 获取EKF当前状态（含上一时刻m估计值）
+
+    double m_est = x_kf_prev(10);                // 上一时刻质量估计值（第11维）
+    // 避免除以0，若m_est异常则用初始值init_m
+    m_est = (m_est > 1e-6) ? m_est : 15;
+
+    Eigen::Vector3d c_q;
+    c_q << 2 * (qw * qy + qx * qz),
+           2 * (qy * qz - qw * qx),
+           1 - 2 * (qx * qx + qy * qy);
+
+    //   3.1 dv/dm 速度对m的偏导数：dv/dm = -T*c_q/(m²)
+    A_ext(7, 10) = - (T * c_q(0)) / (m_est * m_est);  // dvx/dm
+    A_ext(8, 10) = - (T * c_q(1)) / (m_est * m_est);  // dvy/dm
+    A_ext(9, 10) = - (T * c_q(2)) / (m_est * m_est);  // dvz/dm
+
+    // 3.2 dv/dq = (T/m) * ∂c_q/∂q  （3x4 矩阵）
+    Eigen::Matrix<double,3,4> dcq_dq;
+    dcq_dq <<  2*qy,  2*qz,  2*qw,  2*qx,
+              -2*qx, -2*qw,  2*qz,  2*qy,
+               2*qw, -2*qx, -2*qy,  2*qz;   // each row: ∂r_i/∂[qw,qx,qy,qz]
+
+    A_ext.block<3,4>(7,3) = (T / m_est) * dcq_dq; // ∂v_dot / ∂q
+
+
+    //------------------线性化-B矩阵---------------
+
+    // Bu matrix (control input  w_x, w_y, w_z,T)
+    Eigen::MatrixXd B_u(ekf_2.state_size_, ekf_2.control_size_);
+    Eigen::MatrixXd B_d(ekf_2.state_size_, 3);
+    B_u.setZero();
+    B_d.setZero();
+
+    //Aq
+    B_u(3,0) = -0.5 * qx;  // ∂q_w/∂w_x
+    B_u(3,1) = -0.5 * qy;  // ∂q_w/∂w_y
+    B_u(3,2) = -0.5 * qz;  // ∂q_w/∂w_z
+
+    B_u(4,0) =  0.5 * qw;  // ∂q_x/∂w_x
+    B_u(4,1) = -0.5 * qz;  // ∂q_x/∂w_y
+    B_u(4,2) =  0.5 * qy;  // ∂q_x/∂w_z
+
+    B_u(5,0) =  0.5 * qz;  // ∂q_y/∂w_x
+    B_u(5,1) =  0.5 * qw;  // ∂q_y/∂w_y
+    B_u(5,2) = -0.5 * qx;  // ∂q_y/∂w_z
+
+    B_u(6,0) = -0.5 * qy;  // ∂q_z/∂w_x
+    B_u(6,1) =  0.5 * qx;  // ∂q_z/∂w_y
+    B_u(6,2) =  0.5 * qw;  // ∂q_z/∂w_z
+
+    B_u.block<3,1>(7,3) = c_q / m_est;  // dv/dT
+
+
+    B_d.block<3,3>(7, 0) = Eigen::Matrix3d::Identity();//初始化Bd
+
+    //------------------离散化--------------- 
+    Eigen::MatrixXd A2 = A_ext * A_ext;
+    Eigen::MatrixXd A3 = A2 * A_ext;
+    Eigen::MatrixXd A4 = A3 * A_ext;
+
+
+
+    // ESKF Discretization
+    Eigen::MatrixXd temp = Eigen::MatrixXd::Identity(ekf_2.state_size_, ekf_2.state_size_) 
+                            + dt_ * A_ext
+                            + 0.5 * dt_ * dt_ * A2
+                            + (1.0/6.0) * dt_ * dt_ * dt_ * A3
+                            + (1.0/24.0) * dt_ * dt_ * dt_ * dt_ * A4;
+    Eigen::MatrixXd A = temp;
+    B_u = dt_ * B_u;
+    B_d = dt_ * B_d;
+
+
+    // 尾巴项
+    Eigen::VectorXd tail = B_d * d_.block<3, 1>(0, 0) 
+        - g_z * dt_ * Eigen::VectorXd::Unit(ekf_2.state_size_, 9);  
+   
+
+    //--------------- EKF---------------------------
+	ekf_2.predict(A, B_u, tail, u);
+	ekf_2.update(y.block<7, 1>(0, 0));
+	// 状态更新
+
+	Eigen::VectorXd x_kf = ekf_2.getState();//kf 估计状态
+	   
+    // 动力学模型
+    double f_x = z_b(0) * u(3)/m;
+    double f_y = z_b(1) * u(3)/m;
+    double f_z = z_b(2) * u(3)/m - g_z;
+
+    //--------------- ESO---------------------------
+    Eigen::Vector3d e;
+    //e = y.block<3, 1>(0, 0) - z_.block<3, 1>(0, 0);//系统测量
+ 
+    //KF输出
+	 e(0) = x_kf(0) - z_(0);
+	 e(1) = x_kf(1) - z_(1);
+	 e(2) = x_kf(2) - z_(2);
+
+    // 状态更新
+    
+    z_(0) += (z_(3) + l_(0) * e(0)) * dt_;
+    z_(1) += (z_(4) + l_(0) * e(1)) * dt_;
+    z_(2) += (z_(5) + l_(0) * e(2)) * dt_;
+    
+    z_(3) += (f_x + d_(0) + l_(1) * e(0)) * dt_;
+    z_(4) += (f_y + d_(1) + l_(1) * e(1)) * dt_;
+    z_(5) += (f_z + d_(2) + l_(1) * e(2)) * dt_;
+    
+
+    // 扰动更新
+    d_(0) += l_(2) * e(0) * dt_;
+    d_(1) += l_(2) * e(1) * dt_;
+    d_(2) += l_(2) * e(2) * dt_;
+    */
+}
+
+
+
+void DisturbanceObserver::kalman_gpio_update(const Eigen::VectorXd& y, const Eigen::VectorXd& u, double m, double g_z)
+{  
     Eigen::MatrixXd A(kf_.state_size_, kf_.state_size_);
     A.setZero();
 
@@ -393,7 +555,7 @@ void DisturbanceObserver::kalman_gpio_update(const Eigen::VectorXd& y, const Eig
 	// e(3) = estimated_states(1) - z_(3);
 	// e(4) = estimated_states(2) - z_(4);
 
-// 状态更新
+    // 状态更新
     z_(0) += (z_(3) + l_(0) * e(0)) * dt_;
     z_(1) += (z_(4) + l_(0) * e(1)) * dt_;
     z_(2) += (z_(5) + l_(0) * e(2)) * dt_;
@@ -409,6 +571,7 @@ void DisturbanceObserver::kalman_gpio_update(const Eigen::VectorXd& y, const Eig
     dd_(0) += l_(3) * e(0) * dt_;
     dd_(1) += l_(3) * e(1) * dt_;
     dd_(2) += l_(3) * e(2) * dt_;
+    
 }
 
 void DisturbanceObserver::kalman_update(const Eigen::VectorXd& y, const Eigen::VectorXd& u,

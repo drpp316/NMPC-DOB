@@ -17,7 +17,7 @@ struct Bounds
 };
 
 static constexpr float kG = 9.8066;
-static constexpr float kMass = 1.5;
+static constexpr float kMass = 1.5; //1.5  1.745
 // MpcRosApplication is an abstract base class, not allow to create object 
 // of this class, only allow to inherit it
 

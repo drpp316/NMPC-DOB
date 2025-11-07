@@ -1,7 +1,16 @@
 <launch>
 
+  <!-- 1. 设置 YAML 配置文件路径 -->
+   <!--   <param name="config_path" 
+           value="$(find quadrotor_mpc)/config/drone_params.yaml" />  -->
 
- 
+    <!-- 2. 启动主节点 -->
+   <!-- <node name="tracking_node" 
+          pkg="quadrotor_mpc"  
+          type="tracking_node"  
+          output="screen">
+    </node>-->
+
   <!-- 3. 启动 RViz 并加载预设配置文件 -->
   <!-- 
   <node 
@@ -39,4 +48,5 @@
     output="screen" 
     args="--perspective-file $(find quadrotor_mpc)/rqtplot/dhat.perspective"
   />
+  
 </launch>

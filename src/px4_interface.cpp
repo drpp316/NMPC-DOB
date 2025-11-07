@@ -189,7 +189,7 @@ void OffboardMode::pubMavrosControl()
         updateMavrosControl(mpc_ros_application_->getCurrentControl());
         
          // 4. 控制发布频率（每 5 毫秒一次，即 200Hz，满足飞控对控制频率的要求）
-        std::this_thread::sleep_for(std::chrono::milliseconds(5)); 
+        std::this_thread::sleep_for(std::chrono::milliseconds(1)); //5
     }
 }
 
@@ -209,8 +209,52 @@ void OffboardMode::updateMavrosControl(
         bodyrate_thrust_.body_rate.x = control(0); // 角速度 wx（MPC 输出第 0 个元素）
         bodyrate_thrust_.body_rate.y = control(1); // 角速度 wy（MPC 输出第 1 个元素）
         bodyrate_thrust_.body_rate.z = control(2); // 角速度 wz（MPC 输出第 2 个元素）
-        // 2. 推力归一化：将 MPC 输出的推力（control(3)）映射到飞控要求的范围 [min_thrust_, max_thrust_]
-        bodyrate_thrust_.thrust = controlNormalization(control(3), min_thrust_, max_thrust_);
+
+
+        float delta_T = 0;  bool flag_dc=false;
+         // 关键：将 MpcRosApplication* 转换为 TrackingMpc*
+        TrackingMpc* tracking_mpc = dynamic_cast<TrackingMpc*>(mpc_ros_application_);
+        if (tracking_mpc == nullptr ) {  // 转换失败（如指针未正确关联），直接返回避免崩溃
+            ROS_ERROR("Failed to cast mpc_ros_application_ to TrackingMpc*!");
+        }
+        else if( flag_dc==false){
+            //不在此处干扰补偿  delta_T = 0;
+        }
+        else{
+            Eigen::Matrix<real_t, ACADO_NX, 1> current_states = tracking_mpc->getCurrentStates();
+
+            // 2.2 提取姿态四元数 q = [qw, qx, qy, qz]（索引3-6）
+            real_t qw = current_states(3);
+            real_t qx = current_states(4);
+            real_t qy = current_states(5);
+            real_t qz = current_states(6);
+            
+            // 2.3 计算推力转换向量 C（3×1，与之前推导的公式一致）
+            Eigen::Vector3f C;
+            C(0) = 2 * (qx * qz - qw * qy);          // x分量
+            C(1) = 2 * (qy * qz + qw * qx);          // y分量
+            C(2) = qw*qw - qx*qx - qy*qy + qz*qz;    // z分量
+
+            // 3.1 获取干扰估计（3维：d_x, d_y, d_z）
+            Eigen::VectorX<real_t> d_hat_real = tracking_mpc->getDisturbanceEstimate();
+            Eigen::Vector3f d_hat = d_hat_real.cast<float>();  // 转换为float，与C的类型匹配
+            
+            // 3.2 获取无人机质量（real_t 转 float，确保计算类型一致）
+            float m = static_cast<float>(tracking_mpc->getDroneMass());
+            
+            // 3.3 计算推力补偿量 delta_T（公式与之前一致，避免除零）
+            float denominator = C.transpose() * C + 1e-6;
+            float delta_T = -1*m * ( (C.transpose() * d_hat).value() ) / denominator;
+
+           // printf("controller: T- %f\t   dT- %f  \t \n", control(3),delta_T);
+        }
+
+
+        
+        float T=control(3)+delta_T;
+        bodyrate_thrust_.thrust = controlNormalization(T, min_thrust_, max_thrust_);
+
+
         bodyrate_thrust_.header.stamp = current_time;
         // 3. 设置消息时间戳并发布（飞控订阅该消息获取控制指令
         bodyrate_thrust_publisher_.publish(bodyrate_thrust_);

@@ -1,5 +1,5 @@
 #pragma once
-
+#include <ros/ros.h>
 #include <Eigen/Dense>
 #include <deque>
 
@@ -12,6 +12,7 @@ public:
         A_ = Eigen::MatrixXd(state_size, state_size);  // 系统矩阵A
         B_ = Eigen::MatrixXd(state_size, control_size);  // 控制矩阵B
         H_ = Eigen::MatrixXd(measurement_size, state_size);  // 测量矩阵H
+
         R_ = Eigen::MatrixXd(measurement_size, measurement_size);  // 测量噪声协方差矩阵R
         Q_ = Eigen::MatrixXd(state_size, state_size);  // 过程噪声协方差矩阵Q
         Qa_ = Eigen::MatrixXd(state_size, state_size);  // 自适应噪声协方差矩阵Qa
@@ -44,10 +45,12 @@ public:
         x_ = initial_state;
         P_ = 0.01 * Eigen::MatrixXd::Identity(state_size_, state_size_);
         P_.block<3,3>(7,7) = 0.1*Eigen::MatrixXd::Identity(3, 3);
+
         Q_ = 0.001 * Eigen::MatrixXd::Identity(state_size_, state_size_);
         Q_.block<3,3>(7,7) = 0.0016*Eigen::MatrixXd::Identity(3, 3);
         Qa_ = Q_;
-        R_ = 0.0001 * Eigen::MatrixXd::Identity(measurement_size_, measurement_size_);
+        
+        R_ = 0.0008 * Eigen::MatrixXd::Identity(measurement_size_, measurement_size_);
         // R_(0,0) = 0.01;
         // R_(1,1) = 0.01;
         H_ = Eigen::MatrixXd::Zero(measurement_size_, state_size_);
@@ -319,6 +322,7 @@ public:
     // DiscreteKalmanFilter kalman_filter_{3, 3, 4}; 
     DiscreteKalmanFilter kf_{10, 7, 4};
     ESKF eskf_{10, 3, 4, 10};
+    ESKF ekf_2{10, 1, 4, 10};
 
     // 更新ESO
     void update(const Eigen::VectorXd& y, double T, 
@@ -335,6 +339,9 @@ public:
 
     void kalman_geso_update(const Eigen::VectorXd& y, const Eigen::VectorXd& u, double m, double g_z);
 
+    void EKF_geso_update(const Eigen::VectorXd& y, const Eigen::VectorXd& u, double m, double g_z);
+
+    
     void kalman_gpio_update(const Eigen::VectorXd& y, const Eigen::VectorXd& u, double m, double g_z);
 
     void update(const Eigen::VectorXd& y, const Eigen::VectorXd& u,
@@ -349,6 +356,11 @@ public:
     // 获取估计状态
     Eigen::VectorXd getState() const {
         return z_;
+    }
+
+    // 获取kf估计状态
+    Eigen::VectorXd getKfState() const {
+        return kf_.getState();
     }
 
     // 获取估计扰动
@@ -401,16 +413,21 @@ public:
     }
 
 private:
+    //ros::NodeHandle nh_;  
     double dt_;               // 采样时间
     Eigen::VectorXd L_;                 // Lipschitz常数
     Eigen::VectorXd l_;       // ESO增益
     double pole_;             // ESO极点
+    //double omega_;            // 存储从 YAML 读取的 omega 值
+
+
     Eigen::VectorXd z_;       // 扩展状态 [p_x, p_y, p_z, v_x, v_y, v_z]
     Eigen::VectorXd d_;       // 扰动 [d_vx, d_vy, d_vz]
     Eigen::VectorXd dd_;
     Eigen::VectorXd ddd_;
     Eigen::VectorXd fl_;      // 有限时间观测器增益
     Eigen::VectorXd fn_;      // 非线性观测器增益 
+
 };
 
 class ContinuousKalmanFilter {

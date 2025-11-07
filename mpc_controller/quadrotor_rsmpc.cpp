@@ -23,14 +23,14 @@ int main()
 
     // Parameters with exemplary values. These are set/overwritten at runtime.
     const double t_start = 0.0;     // Initial time [s]
-    const double t_end = 1.0;       // Time horizon [s]
+    const double t_end = 2;       // Time horizon [s]
     const double dt = 0.1;          // Discretization time [s] //0.01
     const int N = round(t_end/dt);  // Number of nodes
     const double g_z = 9.8066;      // Gravity is everywhere [m/s^2]
     const double w_max_yaw = 2.0;     // Maximal yaw rate [rad/s]
     const double w_max_xy = 1.5;      // Maximal pitch and roll rate [rad/s]
     const double T_min = 0;         // Minimal thrust [N/kg]
-    const double m = 1.5;           // iris mass [kg]
+    const double m = 1.5; //1.5;1.745    // iris mass [kg]
     const double T_max = 2.0*g_z*m;        // Maximal thrust [N/kg]
     
     // Model equations
